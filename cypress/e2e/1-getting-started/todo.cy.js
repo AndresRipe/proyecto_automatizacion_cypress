@@ -1,143 +1,170 @@
 /// <reference types="cypress" />
 
-// Welcome to Cypress!
-//
-// This spec file contains a variety of sample tests
-// for a todo list app that are designed to demonstrate
-// the power of writing tests in Cypress.
-//
-// To learn more about how Cypress works and
-// what makes it such an awesome testing tool,
-// please read our getting started guide:
-// https://on.cypress.io/introduction-to-cypress
+// Opcional: cambiá esta URL si lo corrés contra prod/dev
 
-describe('example to-do app', () => {
+
+const REGISTER_URL = 'https://ticketazo.com.ar/auth/registerUser';
+// Ajustá este patrón para tu API real (ej: '**/api/**/register*' o '**/auth/**/register*')
+const REGISTER_API_PATTERN = 'api/backend/register/register-user';
+
+const selectAutocomplete = (selector, text) => {
+  cy.get(selector).clear().type(text);
+
+  cy.get('body').then(($body) => {
+    const hasListbox = $body.find('[role="listbox"] [role="option"]').length > 0;
+    if (hasListbox) {
+      cy.get('[role="listbox"] [role="option"]').first().click();
+    } else {
+      cy.get(selector).type('{enter}');
+    }
+  });
+};
+
+const setDate = (rootSelector, { d, m, y }) => {
+  cy.get(rootSelector).within(() => {
+    cy.get('[data-type="day"]').click().type(String(d).padStart(2, '0'));
+    cy.get('[data-type="month"]').click().type(String(m).padStart(2, '0'));
+    cy.get('[data-type="year"]').click().type(String(y));
+  });
+};
+
+const fillAllValid = (overrides = {}) => {
+      const randomDni = () => String(Math.floor(10000000 + Math.random() * 90000000));
+  const data = {
+    nombres: 'Andres',
+    apellido: 'camnlo',
+    telefono: '3511234567', // 10 dígitos
+    dni: randomDni(),       // 8 dígitos
+    provincia: 'Córdoba',
+    localidad: 'Córdoba',
+    fechaNac: { d: 5, m: 11, y: 1996 },
+    email: `facu.qa+${Date.now()}@example.com`,
+    confirmarEmail: null, // si es null, usa el mismo que email
+    password: 'Qa!12345',
+    repetirPassword: null // si es null, usa el mismo que password
+  };
+
+  Object.assign(data, overrides);
+  if (!data.confirmarEmail) data.confirmarEmail = data.email;
+  if (!data.repetirPassword) data.repetirPassword = data.password;
+
+  cy.get('[data-cy="input-nombres"]').clear().type(data.nombres);
+  cy.get('[data-cy="input-apellido"]').clear().type(data.apellido);
+
+  cy.get('[data-cy="input-telefono"]').clear().type(data.telefono);
+  cy.get('[data-cy="input-dni"]').clear().type(data.dni);
+
+  selectAutocomplete('[data-cy="select-provincia"]', data.provincia);
+  selectAutocomplete('[data-cy="select-localidad"]', data.localidad);
+
+  // fechaNac: si es false, la dejamos incompleta (negativo)
+  if (data.fechaNac) setDate('[data-cy="input-fecha-nacimiento"]', data.fechaNac);
+
+  cy.get('[data-cy="input-email"]').clear().type(data.email);
+  cy.get('[data-cy="input-confirmar-email"]').clear().type(data.confirmarEmail);
+
+  cy.get('[data-cy="input-password"]').clear().type(data.password, { log: false });
+  cy.get('[data-cy="input-repetir-password"]').clear().type(data.repetirPassword, { log: false });
+
+  return data;
+};
+
+const assertNoRegisterRequest = () => {
+  // Damos un respiro a la UI para intentar enviar
+  cy.wait(400);
+  // En Cypress se puede inspeccionar la cantidad de intercepciones con .all
+  cy.get('@register.all').should('have.length', 0);
+};
+
+describe('Registro de cuenta', () => {
   beforeEach(() => {
-    // Cypress starts out with a blank slate for each test
-    // so we must tell it to visit our website with the `cy.visit()` command.
-    // Since we want to visit the same URL at the start of all our tests,
-    // we include it in our beforeEach function so that it runs before each test
-    cy.visit('https://example.cypress.io/todo')
-  })
+    cy.intercept('POST', REGISTER_API_PATTERN).as('register'); // spy (no stub)
+    cy.visit(REGISTER_URL);
+  });
 
-  it('displays two todo items by default', () => {
-    // We use the `cy.get()` command to get all elements that match the selector.
-    // Then, we use `should` to assert that there are two matched items,
-    // which are the two default items.
-    cy.get('.todo-list li').should('have.length', 2)
+  it('registra correctamente y devuelve 200/201', () => {
+    fillAllValid();
 
-    // We can go even further and check that the default todos each contain
-    // the correct text. We use the `first` and `last` functions
-    // to get just the first and last matched elements individually,
-    // and then perform an assertion with `should`.
-    cy.get('.todo-list li').first().should('have.text', 'Pay electric bill')
-    cy.get('.todo-list li').last().should('have.text', 'Walk the dog')
-  })
+    // Antes de enviar, no debería haber inputs inválidos
+    cy.get('input:invalid').should('have.length', 0);
 
-  it('can add new todo items', () => {
-    // We'll store our item text in a variable so we can reuse it
-    const newItem = 'Feed the cat'
+    cy.get('[data-cy="btn-registrarse"]').click();
 
-    // Let's get the input element and use the `type` command to
-    // input our new list item. After typing the content of our item,
-    // we need to type the enter key as well in order to submit the input.
-    // This input has a data-test attribute so we'll use that to select the
-    // element in accordance with best practices:
-    // https://on.cypress.io/selecting-elements
-    cy.get('[data-test=new-todo]').type(`${newItem}{enter}`)
+    // Asertamos respuesta 200/201 de la request real
+    cy.wait('@register').its('response.statusCode').should('be.oneOf', [200, 201]);
 
-    // Now that we've typed our new item, let's check that it actually was added to the list.
-    // Since it's the newest item, it should exist as the last element in the list.
-    // In addition, with the two default items, we should have a total of 3 elements in the list.
-    // Since assertions yield the element that was asserted on,
-    // we can chain both of these assertions together into a single statement.
-    cy.get('.todo-list li')
-      .should('have.length', 3)
-      .last()
-      .should('have.text', newItem)
-  })
+    // Opcional: assert de redirección o mensaje de éxito
+    // cy.url().should('include', '/auth/login');
+    // cy.contains(/registro (exitoso|completado)/i).should('be.visible');
+  });
 
-  it('can check off an item as completed', () => {
-    // In addition to using the `get` command to get an element by selector,
-    // we can also use the `contains` command to get an element by its contents.
-    // However, this will yield the <label>, which is lowest-level element that contains the text.
-    // In order to check the item, we'll find the <input> element for this <label>
-    // by traversing up the dom to the parent element. From there, we can `find`
-    // the child checkbox <input> element and use the `check` command to check it.
-    cy.contains('Pay electric bill')
-      .parent()
-      .find('input[type=checkbox]')
-      .check()
+  it('no envía si hay campos requeridos vacíos', () => {
+    // Click directo sin completar nada
+    cy.get('[data-cy="btn-registrarse"]').click();
 
-    // Now that we've checked the button, we can go ahead and make sure
-    // that the list element is now marked as completed.
-    // Again we'll use `contains` to find the <label> element and then use the `parents` command
-    // to traverse multiple levels up the dom until we find the corresponding <li> element.
-    // Once we get that element, we can assert that it has the completed class.
-    cy.contains('Pay electric bill')
-      .parents('li')
-      .should('have.class', 'completed')
-  })
+    cy.get('input:invalid').its('length').should('be.greaterThan', 0);
+    assertNoRegisterRequest();
+  });
 
-  context('with a checked task', () => {
-    beforeEach(() => {
-      // We'll take the command we used above to check off an element
-      // Since we want to perform multiple tests that start with checking
-      // one element, we put it in the beforeEach hook
-      // so that it runs at the start of every test.
-      cy.contains('Pay electric bill')
-        .parent()
-        .find('input[type=checkbox]')
-        .check()
-    })
+  it('no envía con teléfono inválido (<10 dígitos)', () => {
+    fillAllValid({ telefono: '351123' }); // inválido por pattern/maxlength
+    cy.get('[data-cy="btn-registrarse"]').click();
 
-    it('can filter for uncompleted tasks', () => {
-      // We'll click on the "active" button in order to
-      // display only incomplete items
-      cy.contains('Active').click()
+    cy.get('[data-cy="input-telefono"]').then(($i) => {
+      expect($i[0].checkValidity()).to.equal(false);
+    });
+    assertNoRegisterRequest();
+  });
 
-      // After filtering, we can assert that there is only the one
-      // incomplete item in the list.
-      cy.get('.todo-list li')
-        .should('have.length', 1)
-        .first()
-        .should('have.text', 'Walk the dog')
+  it('no envía con DNI inválido (<8 dígitos)', () => {
+    fillAllValid({ dni: '1234' });
+    cy.get('[data-cy="btn-registrarse"]').click();
 
-      // For good measure, let's also assert that the task we checked off
-      // does not exist on the page.
-      cy.contains('Pay electric bill').should('not.exist')
-    })
+    cy.get('[data-cy="input-dni"]').then(($i) => {
+      expect($i[0].checkValidity()).to.equal(false);
+    });
+    assertNoRegisterRequest();
+  });
 
-    it('can filter for completed tasks', () => {
-      // We can perform similar steps as the test above to ensure
-      // that only completed tasks are shown
-      cy.contains('Completed').click()
+  it('no envía con email inválido (type="email")', () => {
+    fillAllValid({ email: 'facu@', confirmarEmail: 'facu@' }); // inválido HTML5
+    cy.get('[data-cy="btn-registrarse"]').click();
 
-      cy.get('.todo-list li')
-        .should('have.length', 1)
-        .first()
-        .should('have.text', 'Pay electric bill')
+    cy.get('[data-cy="input-email"]').then(($i) => {
+      expect($i[0].checkValidity()).to.equal(false);
+    });
+    assertNoRegisterRequest();
+  });
 
-      cy.contains('Walk the dog').should('not.exist')
-    })
+  it('no envía si los emails NO coinciden (si tu UI lo valida)', () => {
+    // Si la app no valida en front esta regla, este test fallará: ajustalo según comportamiento real.
+    fillAllValid({
+      email: `facu.qa+${Date.now()}@example.com`,
+      confirmarEmail: 'otro+correo@example.com'
+    });
 
-    it('can delete all completed tasks', () => {
-      // First, let's click the "Clear completed" button
-      // `contains` is actually serving two purposes here.
-      // First, it's ensuring that the button exists within the dom.
-      // This button only appears when at least one task is checked
-      // so this command is implicitly verifying that it does exist.
-      // Second, it selects the button so we can click it.
-      cy.contains('Clear completed').click()
+    cy.get('[data-cy="btn-registrarse"]').click();
 
-      // Then we can make sure that there is only one element
-      // in the list and our element does not exist
-      cy.get('.todo-list li')
-        .should('have.length', 1)
-        .should('not.have.text', 'Pay electric bill')
+    // Esperamos que el front evite enviar al backend
+    assertNoRegisterRequest();
 
-      // Finally, make sure that the clear button no longer exists.
-      cy.contains('Clear completed').should('not.exist')
-    })
-  })
-})
+    // (Opcional) si hay mensaje de error
+    // cy.contains(/emails? no coinciden/i).should('be.visible');
+  });
+
+  it('no envía si la fecha está incompleta', () => {
+    // Pasamos fechaNac = false para dejar "dd/mm/aaaa"
+    fillAllValid({ fechaNac: false });
+
+    cy.get('[data-cy="btn-registrarse"]').click();
+
+    // El DateField incluye un input hidden required -> debe invalidar el form
+    cy.get('input:invalid').its('length').should('be.greaterThan', 0);
+    assertNoRegisterRequest();
+  });
+
+  it('permite ir al login desde el link', () => {
+    cy.get('[data-cy="btn-login-link"]').click();
+    cy.url().should('include', '/auth/login');
+  });
+});
