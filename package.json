@@ -9,7 +9,8 @@
   "author": "andres",
   "license": "ISC",
   "devDependencies": {
-    "cypress": "^15.3.0"
+    "cypress": "^15.3.0",
+    "cypress-xpath": "^2.0.1"
   },
   "dependencies": {
     "cypress-plugin-tab": "^1.0.5"
